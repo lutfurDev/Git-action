@@ -57,13 +57,81 @@ jobs:
           path: ${{ steps.apk_info.outputs.apk_path }}
       
       - name: Upload APK to Google Drive
-        if: secrets.GDRIVE_CREDENTIALS_DATA != ''
-        uses: Jumbo810/Upload_Github_Artifacts_TO_GDrive@v2.2.2
-        with:
-          target: ${{ steps.apk_info.outputs.apk_path }}
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
-          parent_folder_id: 1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu
-          name: app-release-${{ github.sha }}.apk
+        env:
+          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          FOLDER_ID: "1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu"
+          APK_PATH: ${{ steps.apk_info.outputs.apk_path }}
+        run: |
+          if [ -z "$GDRIVE_CREDENTIALS" ]; then
+            echo "⚠️  GDRIVE_CREDENTIALS_DATA secret is not set. Skipping Google Drive upload."
+            echo "Please follow the setup guide in .github/workflows/GOOGLE_DRIVE_SETUP.md"
+            exit 0
+          fi
+          
+          # Install required packages
+          pip install --upgrade google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+          
+          # Create credentials file
+          echo "$GDRIVE_CREDENTIALS" > /tmp/credentials.json
+          
+          # Create Python upload script
+          cat > /tmp/upload.py << 'PYTHON_SCRIPT'
+          import os
+          import sys
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+          
+          def upload_file():
+              try:
+                  # Setup credentials
+                  SCOPES = ['https://www.googleapis.com/auth/drive.file']
+                  SERVICE_ACCOUNT_FILE = '/tmp/credentials.json'
+                  
+                  credentials = service_account.Credentials.from_service_account_file(
+                      SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+                  
+                  # Build the Drive service
+                  service = build('drive', 'v3', credentials=credentials)
+                  
+                  # Get file details
+                  apk_path = os.environ.get('APK_PATH')
+                  folder_id = os.environ.get('FOLDER_ID')
+                  file_name = f"app-release-{os.environ.get('GITHUB_SHA', 'unknown')[:7]}.apk"
+                  
+                  # Upload file
+                  file_metadata = {
+                      'name': file_name,
+                      'parents': [folder_id]
+                  }
+                  
+                  media = MediaFileUpload(apk_path, mimetype='application/vnd.android.package-archive')
+                  
+                  file = service.files().create(
+                      body=file_metadata,
+                      media_body=media,
+                      fields='id, name, webViewLink'
+                  ).execute()
+                  
+                  print(f"✅ File uploaded successfully!")
+                  print(f"📦 File Name: {file.get('name')}")
+                  print(f"🔗 File ID: {file.get('id')}")
+                  print(f"🌐 View Link: {file.get('webViewLink')}")
+                  
+                  return 0
+              except Exception as e:
+                  print(f"❌ Error uploading file: {str(e)}")
+                  return 1
+          
+          if __name__ == '__main__':
+              sys.exit(upload_file())
+          PYTHON_SCRIPT
+          
+          # Run the upload script
+          python3 /tmp/upload.py
+          
+          # Cleanup
+          rm -f /tmp/credentials.json /tmp/upload.py
       
       - name: Send APK to Microsoft Teams
         env:
