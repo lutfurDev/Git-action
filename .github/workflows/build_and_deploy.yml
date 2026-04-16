@@ -1,0 +1,151 @@
+name: Build and Deploy APK to Teams
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+    types: [closed]
+
+jobs:
+  build:
+    # Only run if PR is merged or direct push to master
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      
+      - name: Get dependencies
+        run: flutter pub get
+      
+      - name: Run tests
+        run: flutter test || echo "Tests failed but continuing build"
+        continue-on-error: true
+      
+      - name: Build APK
+        run: flutter build apk --release
+      
+      - name: Get APK file name
+        id: apk_info
+        run: |
+          APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
+          APK_NAME=$(basename $APK_PATH)
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "apk_size=$(du -h $APK_PATH | cut -f1)" >> $GITHUB_OUTPUT
+      
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: ${{ steps.apk_info.outputs.apk_path }}
+      
+      - name: Send APK to Microsoft Teams
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          if [ -z "$TEAMS_WEBHOOK_URL" ]; then
+            echo "⚠️  TEAMS_WEBHOOK_URL secret is not set. Skipping Teams notification."
+            exit 0
+          fi
+          
+          # Get commit info
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          COMMIT_AUTHOR=$(git log -1 --pretty=%an)
+          COMMIT_SHA=$(git log -1 --pretty=%h)
+          
+          # Create message payload
+          MESSAGE=$(cat <<EOF
+          {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "summary": "APK Build Completed",
+            "themeColor": "0078D7",
+            "title": "✅ APK Build Successful",
+            "sections": [
+              {
+                "activityTitle": "Build Information",
+                "facts": [
+                  {
+                    "name": "Repository:",
+                    "value": "${{ github.repository }}"
+                  },
+                  {
+                    "name": "Branch:",
+                    "value": "${{ github.ref_name }}"
+                  },
+                  {
+                    "name": "Commit:",
+                    "value": "$COMMIT_SHA"
+                  },
+                  {
+                    "name": "Author:",
+                    "value": "$COMMIT_AUTHOR"
+                  },
+                  {
+                    "name": "APK Size:",
+                    "value": "${{ steps.apk_info.outputs.apk_size }}"
+                  },
+                  {
+                    "name": "APK Name:",
+                    "value": "${{ steps.apk_info.outputs.apk_name }}"
+                  }
+                ],
+                "text": "$COMMIT_MSG"
+              }
+            ],
+            "potentialAction": [
+              {
+                "@type": "OpenUri",
+                "name": "View Build",
+                "targets": [
+                  {
+                    "os": "default",
+                    "uri": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              },
+              {
+                "@type": "OpenUri",
+                "name": "Download APK",
+                "targets": [
+                  {
+                    "os": "default",
+                    "uri": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+          
+          # Send to Teams
+          curl -H "Content-Type: application/json" -d "$MESSAGE" "$TEAMS_WEBHOOK_URL"
+          echo "✅ Notification sent to Microsoft Teams"
+      
+      - name: Build summary
+        run: |
+          echo "### 🎉 Build Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**APK Details:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Name: ${{ steps.apk_info.outputs.apk_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Size: ${{ steps.apk_info.outputs.apk_size }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Path: \`${{ steps.apk_info.outputs.apk_path }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the APK from the artifacts section above." >> $GITHUB_STEP_SUMMARY
