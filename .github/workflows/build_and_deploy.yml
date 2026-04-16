@@ -57,14 +57,13 @@ jobs:
           path: ${{ steps.apk_info.outputs.apk_path }}
       
       - name: Upload APK to Google Drive
-        if: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
-        uses: adityak74/google-drive-upload-git-action@main
+        if: secrets.GDRIVE_CREDENTIALS_DATA != ''
+        uses: Jumbo810/Upload_Github_Artifacts_TO_GDrive@v2.2.2
         with:
+          target: ${{ steps.apk_info.outputs.apk_path }}
           credentials: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
-          filename: ${{ steps.apk_info.outputs.apk_path }}
-          folderId: "1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu"
-          name: "app-release-${{ github.sha }}.apk"
-          overwrite: "false"
+          parent_folder_id: 1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu
+          name: app-release-${{ github.sha }}.apk
       
       - name: Send APK to Microsoft Teams
         env:
