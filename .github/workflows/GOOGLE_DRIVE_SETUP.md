@@ -1,144 +1,98 @@
-# Google Drive Upload Setup Guide
+# Google Drive Upload Setup Guide (EASY METHOD)
 
-## 📋 Prerequisites
-- Google Account
-- Access to the target Google Drive folder
+## 🎯 Quick Setup (5 minutes)
 
-## 🔧 Setup Steps
+### Step 1: Create Google Cloud Project
 
-### Step 1: Install rclone on your local machine
+1. Go to https://console.cloud.google.com/
+2. Click **Create Project** or select existing project
+3. Name it anything (e.g., "GitHub Actions Upload")
+4. Click **Create**
 
-**macOS:**
-```bash
-brew install rclone
-```
+### Step 2: Enable Google Drive API
 
-**Linux:**
-```bash
-curl https://rclone.org/install.sh | sudo bash
-```
+1. In your project, go to **APIs & Services** → **Library**
+2. Search for "Google Drive API"
+3. Click on it and click **Enable**
 
-**Windows:**
-Download from https://rclone.org/downloads/
+### Step 3: Create Service Account
 
-### Step 2: Configure rclone with Google Drive
+1. Go to **APIs & Services** → **Credentials**
+2. Click **Create Credentials** → **Service Account**
+3. Name: `github-actions-upload` (or anything)
+4. Click **Create and Continue**
+5. Role: Select **Basic** → **Editor** (or **Google Drive** → **Drive File Editor**)
+6. Click **Continue** then **Done**
 
-1. Run the configuration wizard:
-```bash
-rclone config
-```
+### Step 4: Create Service Account Key
 
-2. Follow these prompts:
-   - Type `n` for "New remote"
-   - Name: `gdrive` (must be "gdrive")
-   - Storage: Type the number for "Google Drive" (usually `15`)
-   - Client ID: Press Enter (leave blank)
-   - Client Secret: Press Enter (leave blank)
-   - Scope: Type `1` for "Full access"
-   - Root folder ID: Press Enter (leave blank)
-   - Service Account File: Press Enter (leave blank)
-   - Advanced config: Type `n`
-   - Auto config: Type `y` (or `n` if on a remote server)
-   - A browser window will open - **Sign in with your Google account** and allow access
-   - Choose "This account is a team drive": Type `n`
-   - Type `y` to confirm
-   - Type `q` to quit config
+1. Click on the service account you just created
+2. Go to **Keys** tab
+3. Click **Add Key** → **Create new key**
+4. Select **JSON**
+5. Click **Create** - a JSON file will download
+6. **Keep this file safe!**
 
-3. Verify the configuration:
-```bash
-rclone listremotes
-```
-You should see `gdrive:` in the list.
+### Step 5: Share Google Drive Folder
 
-### Step 3: Test the upload
+1. Open your Google Drive folder: https://drive.google.com/drive/folders/1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu
+2. Click **Share** button
+3. Copy the **email address** from the JSON file (look for `client_email` field)
+   - It looks like: `github-actions-upload@project-id.iam.gserviceaccount.com`
+4. Paste this email in the Share dialog
+5. Give it **Editor** permissions
+6. Click **Share** (uncheck "Notify people" if prompted)
 
-Test if you can upload to your folder:
-```bash
-echo "test" > test.txt
-rclone copy test.txt gdrive:1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu
-```
+### Step 6: Add Credentials to GitHub
 
-Check your Google Drive folder to verify the test file was uploaded.
+1. Open the downloaded JSON file
+2. Copy **ALL the content** (the entire JSON)
+3. Go to your GitHub repository
+4. Click **Settings** → **Secrets and variables** → **Actions**
+5. Click **New repository secret**
+6. Name: `GDRIVE_CREDENTIALS_DATA`
+7. Value: Paste the entire JSON content
+8. Click **Add secret**
 
-### Step 4: Get rclone configuration
+### Step 7: Test It!
 
-Get your rclone config file content:
-```bash
-cat ~/.config/rclone/rclone.conf
-```
-
-Copy the **entire output**. It should look like:
-```
-[gdrive]
-type = drive
-scope = drive
-token = {"access_token":"ya29...","token_type":"Bearer",...}
-team_drive = 
-```
-
-### Step 5: Add to GitHub Secrets
-
-1. Go to your GitHub repository
-2. Click **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret**
-4. Name: `RCLONE_CONFIG`
-5. Value: Paste the entire content from Step 4
-6. Click **Add secret**
-
-### Step 6: Test the workflow
-
-Push a commit to master branch:
+Push a change to master branch:
 ```bash
 git add .
 git commit -m "Test Google Drive upload"
 git push origin master
 ```
 
-Check the Actions tab to see if the APK is uploaded to Google Drive.
-
-## 📂 Target Folder
-
-Your APKs will be uploaded to:
-https://drive.google.com/drive/folders/1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu
-
-## 🔒 Security Notes
-
-- The rclone config contains OAuth tokens - keep it secret!
-- Tokens expire and refresh automatically
-- Never commit the rclone.conf file to your repository
-- Use GitHub Secrets to store sensitive data
-
-## 🎯 File Naming
-
-APK files are uploaded with this format:
-```
-app-release-{commit-sha}-{timestamp}.apk
-```
-
-Example: `app-release-abc123-20260416_143025.apk`
-
-## 🐛 Troubleshooting
-
-**"RCLONE_CONFIG secret is not set"**
-- Make sure you created the secret with exact name: `RCLONE_CONFIG`
-
-**"Failed to upload"**
-- Verify the folder ID is correct
-- Check if the Google account has write access to the folder
-- Re-run the rclone config and update the secret
-
-**Token expired**
-- Re-run `rclone config` to refresh the token
-- Update the `RCLONE_CONFIG` secret with new content
+Check the Actions tab - the APK should upload to your Google Drive folder!
 
 ## ✅ Verification
 
-After successful upload, you should see in the workflow logs:
-```
-✅ APK uploaded to Google Drive successfully!
-```
+1. Go to Actions tab on GitHub
+2. Click on the latest workflow run
+3. Check the "Upload APK to Google Drive" step
+4. Should see: ✅ Success
+5. Check your Google Drive folder - APK should be there!
 
-And the Teams notification will show:
-```
-Status: ✅ Uploaded to Google Drive
-```
+## 📂 Your Google Drive Folder
+
+https://drive.google.com/drive/folders/1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu
+
+## 🐛 Troubleshooting
+
+**"GDRIVE_CREDENTIALS_DATA secret is not set"**
+- Make sure secret name is exactly: `GDRIVE_CREDENTIALS_DATA`
+- Check that you pasted the entire JSON content
+
+**"Permission denied" or "File not found"**
+- Verify you shared the folder with the service account email
+- Check the folder ID is correct in the workflow file
+
+**"Invalid credentials"**
+- Make sure you copied the entire JSON file content
+- Check that the Google Drive API is enabled
+
+## 🔒 Security Note
+
+- Never commit the JSON credentials file to your repository
+- Only store it in GitHub Secrets
+- The service account only has access to folders you explicitly share with it
