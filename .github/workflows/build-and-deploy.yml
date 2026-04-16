@@ -1,0 +1,177 @@
+name: Build and Deploy to Teams
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+    types: [closed]
+
+jobs:
+  build:
+    # Only run on merged PRs or direct pushes to master
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+      
+      - name: Get dependencies
+        run: flutter pub get
+      
+      - name: Run tests
+        run: flutter test
+        continue-on-error: true
+      
+      - name: Build APK
+        run: flutter build apk --release
+      
+      - name: Get version and build number
+        id: version
+        run: |
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          BUILD_NUMBER=$(echo $VERSION | cut -d'+' -f2)
+          VERSION_NAME=$(echo $VERSION | cut -d'+' -f1)
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Rename APK
+        run: |
+          mkdir -p output
+          cp build/app/outputs/flutter-apk/app-release.apk output/git_action-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}.apk
+      
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: git_action-release-apk
+          path: output/*.apk
+          retention-days: 30
+      
+      - name: Send APK to Microsoft Teams
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          APK_PATH="output/git_action-v${{ steps.version.outputs.version_name }}-build${{ steps.version.outputs.build_number }}.apk"
+          APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          COMMIT_SHA=$(git log -1 --pretty=format:'%h')
+          
+          # Create Teams message card
+          cat > teams-message.json << EOF
+          {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "themeColor": "0078D7",
+            "summary": "New APK Build Available",
+            "sections": [{
+              "activityTitle": "✅ New APK Build Successful",
+              "activitySubtitle": "git_action v${{ steps.version.outputs.version_name }} (Build ${{ steps.version.outputs.build_number }})",
+              "activityImage": "https://developer.android.com/static/images/brand/Android_Robot.png",
+              "facts": [
+                {
+                  "name": "Version:",
+                  "value": "${{ steps.version.outputs.version_name }}"
+                },
+                {
+                  "name": "Build Number:",
+                  "value": "${{ steps.version.outputs.build_number }}"
+                },
+                {
+                  "name": "APK Size:",
+                  "value": "$APK_SIZE"
+                },
+                {
+                  "name": "Commit:",
+                  "value": "$COMMIT_SHA"
+                },
+                {
+                  "name": "Author:",
+                  "value": "$COMMIT_AUTHOR"
+                },
+                {
+                  "name": "Message:",
+                  "value": "$COMMIT_MSG"
+                }
+              ],
+              "markdown": true
+            }],
+            "potentialAction": [{
+              "@type": "OpenUri",
+              "name": "Download APK",
+              "targets": [{
+                "os": "default",
+                "uri": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }]
+            },
+            {
+              "@type": "OpenUri",
+              "name": "View Commit",
+              "targets": [{
+                "os": "default",
+                "uri": "https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+              }]
+            }]
+          }
+          EOF
+          
+          # Send to Teams
+          curl -H "Content-Type: application/json" \
+               -d @teams-message.json \
+               "$TEAMS_WEBHOOK_URL"
+      
+      - name: Notify on failure
+        if: failure()
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          
+          curl -H "Content-Type: application/json" \
+               -d '{
+                 "@type": "MessageCard",
+                 "@context": "https://schema.org/extensions",
+                 "themeColor": "FF0000",
+                 "summary": "Build Failed",
+                 "sections": [{
+                   "activityTitle": "❌ Build Failed",
+                   "activitySubtitle": "git_action",
+                   "facts": [
+                     {
+                       "name": "Author:",
+                       "value": "'"$COMMIT_AUTHOR"'"
+                     },
+                     {
+                       "name": "Commit Message:",
+                       "value": "'"$COMMIT_MSG"'"
+                     }
+                   ]
+                 }],
+                 "potentialAction": [{
+                   "@type": "OpenUri",
+                   "name": "View Build Log",
+                   "targets": [{
+                     "os": "default",
+                     "uri": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                   }]
+                 }]
+               }' \
+               "$TEAMS_WEBHOOK_URL"
