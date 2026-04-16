@@ -30,6 +30,7 @@ jobs:
         with:
           channel: 'stable'
       
+
       - name: Get dependencies
         run: flutter pub get
       
@@ -56,31 +57,14 @@ jobs:
           path: ${{ steps.apk_info.outputs.apk_path }}
       
       - name: Upload APK to Google Drive
-        env:
-          GOOGLE_DRIVE_FOLDER_ID: "1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu"
-          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
-        run: |
-          if [ -z "$RCLONE_CONFIG" ]; then
-            echo "⚠️  RCLONE_CONFIG secret is not set. Skipping Google Drive upload."
-          else
-            # Install rclone
-            curl https://rclone.org/install.sh | sudo bash
-            
-            # Create rclone config from secret
-            mkdir -p ~/.config/rclone
-            echo "$RCLONE_CONFIG" > ~/.config/rclone/rclone.conf
-            
-            # Generate unique filename with timestamp and commit SHA
-            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-            COMMIT_SHA=$(git log -1 --pretty=%h)
-            NEW_APK_NAME="app-release-${COMMIT_SHA}-${TIMESTAMP}.apk"
-            
-            # Upload to Google Drive
-            rclone copy "${{ steps.apk_info.outputs.apk_path }}" "gdrive:$GOOGLE_DRIVE_FOLDER_ID" --drive-use-trash=false
-            
-            echo "✅ APK uploaded to Google Drive successfully!"
-            echo "📦 File: $NEW_APK_NAME"
-          fi
+        if: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+        uses: adityak74/google-drive-upload-git-action@main
+        with:
+          credentials: ${{ secrets.GDRIVE_CREDENTIALS_DATA }}
+          filename: ${{ steps.apk_info.outputs.apk_path }}
+          folderId: "1hhGyEjYhj5-P0gEP26YsVBCvr1nEsavu"
+          name: "app-release-${{ github.sha }}.apk"
+          overwrite: "false"
       
       - name: Send APK to Microsoft Teams
         env:
